@@ -12,6 +12,9 @@
 #
 # Expected env vars: ENV_NAME, LORA_FREQ, LORA_BW, LORA_SF,
 #                    MESHCORE_COMMIT (optional)
+# ENV_NAME selects the WisBlock variant:
+#   RAK_4631_*  → variants/rak4631/platformio.ini  (standard)
+#   RAK_3401_*  → variants/rak3401/platformio.ini  (1 watt)
 set -euo pipefail
 
 MESHCORE_REPO="https://github.com/meshcore-dev/MeshCore.git"
@@ -42,7 +45,7 @@ git checkout --detach "$MESHCORE_COMMIT"
 echo "  Checked out: $(git log -1 --format='%h %s')"
 
 ROOT_INI="platformio.ini"
-VARIANT_INI="variants/rak4631/platformio.ini"
+VARIANT_INI="$(python3 /scripts/variant_ini.py "$ENV_NAME")"
 
 for ini in "$ROOT_INI" "$VARIANT_INI"; do
     if [ ! -f "$ini" ]; then
@@ -72,8 +75,9 @@ python3 "$PATCHES/patch_env_sensor_manager.py" "$ENV_SENSOR_CPP"
 # ── Build ────────────────────────────────────────────────────────────────────
 echo
 echo "Building '${ENV_NAME}' (first run downloads ~500 MB of toolchain)..."
-# For rak4631 (nrfutil upload protocol) PlatformIO produces firmware.zip
-# (DFU package) as the primary target and firmware.hex as an intermediate.
+# For nRF52 WisBlock boards (nrfutil upload protocol) PlatformIO produces
+# firmware.zip (DFU package) as the primary target and firmware.hex as
+# an intermediate.
 pio run -e "$ENV_NAME"
 
 BUILD_OUT=".pio/build/${ENV_NAME}"
@@ -91,7 +95,7 @@ ls -lh "$BUILD_OUT"/ 2>/dev/null | tail -n +2
 # Copy firmware artifacts to the bind-mounted /output directory.
 # firmware.zip  — DFU package for adafruit-nrfutil serial flashing
 # firmware.hex  — intermediate hex (also usable with nrfjprog / J-Link)
-# firmware.uf2  — UF2 for drag-and-drop via the RAK4631 bootloader drive
+# firmware.uf2  — UF2 for drag-and-drop via the WisBlock bootloader drive
 COPIED=0
 for f in firmware.zip firmware.hex firmware.uf2; do
     src="${BUILD_OUT}/${f}"

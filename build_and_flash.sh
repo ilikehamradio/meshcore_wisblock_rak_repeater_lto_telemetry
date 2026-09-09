@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Build MeshCore firmware for RAK WisBlock (RAK4631 / nRF52840) in Docker
-# and flash to the device via DFU serial, J-Link, or UF2.
+# Build MeshCore firmware for RAK WisBlock in Docker and flash via DFU serial,
+# J-Link, or UF2.
 #
+# Hardware: standard RAK4631, or 1W WisMesh (RAK3401 + RAK13302).
 # ENV_INCLUDE_INA3221=1 is enabled via sensor_base (confirmed at build time).
 #
-# Usage: ./build_and_flash.sh [--commit <COMMIT>] [--env <ENV_NAME>]
+# Usage: ./build_and_flash.sh [--commit <COMMIT>] [--board <TYPE>] [--env <ENV_NAME>]
 #   --commit  Pin to a specific MeshCore git commit (default: latest main)
-#   --env     PlatformIO environment to build   (default: RAK_4631_repeater)
+#   --board   standard|rak4631  or  1w|rak3401  (prompted if omitted)
+#   --env     PlatformIO environment to build (overrides --board)
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -25,7 +27,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
 HOST_SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 MESHCORE_COMMIT=""
-ENV_NAME="RAK_4631_repeater"
+ENV_NAME=""
+BOARD_NAME=""
+BOARD_FLAG=""
+ENV_FLAG=""
+
+# ---------------------------------------------------------------------------
+# Hardware helpers
+# ---------------------------------------------------------------------------
+# Sets ENV_NAME and BOARD_NAME from a --board value or interactive choice.
+apply_board_choice() {
+    local choice="${1:-}"
+    case "$choice" in
+        1|standard|rak4631)
+            ENV_NAME="RAK_4631_repeater"
+            BOARD_NAME="Standard WisBlock RAK (RAK4631)"
+            ;;
+        2|1w|1watt|rak3401)
+            ENV_NAME="RAK_3401_repeater"
+            BOARD_NAME="1 watt WisBlock (RAK3401 + RAK13302)"
+            ;;
+        *)
+            echo -e "${RED}Invalid hardware selection: ${choice}${NC}"
+            echo "  Use 1 / standard / rak4631    or    2 / 1w / rak3401"
+            exit 1
+            ;;
+    esac
+}
+
+label_for_env() {
+    case "$1" in
+        RAK_3401|RAK_3401_*) echo "1 watt WisBlock (RAK3401 + RAK13302)" ;;
+        RAK_4631|RAK_4631_*) echo "Standard WisBlock RAK (RAK4631)" ;;
+        *)                   echo "$1" ;;
+    esac
+}
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -40,12 +76,20 @@ while [[ $# -gt 0 ]]; do
             MESHCORE_COMMIT="$2"
             shift 2
             ;;
+        --board|-b)
+            if [[ -z "${2:-}" ]]; then
+                echo -e "${RED}Error: --board requires a value (standard|1w).${NC}"
+                exit 1
+            fi
+            BOARD_FLAG="$2"
+            shift 2
+            ;;
         --env|-e)
             if [[ -z "${2:-}" ]]; then
                 echo -e "${RED}Error: --env requires a value.${NC}"
                 exit 1
             fi
-            ENV_NAME="$2"
+            ENV_FLAG="$2"
             shift 2
             ;;
         --rebuild|-r)
@@ -53,16 +97,24 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            head -n 10 "$0" | grep '^#' | sed 's/^# \?//'
+            head -n 12 "$0" | grep '^#' | sed 's/^# \?//'
             exit 0
             ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
-            echo "Usage: $0 [--commit COMMIT] [--env ENV_NAME]"
+            echo "Usage: $0 [--commit COMMIT] [--board standard|1w] [--env ENV_NAME]"
             exit 1
             ;;
     esac
 done
+
+# --env always wins over --board so a full PlatformIO env name can be forced.
+if [[ -n "$ENV_FLAG" ]]; then
+    ENV_NAME="$ENV_FLAG"
+    BOARD_NAME="$(label_for_env "$ENV_NAME")"
+elif [[ -n "$BOARD_FLAG" ]]; then
+    apply_board_choice "$BOARD_FLAG"
+fi
 
 # ---------------------------------------------------------------------------
 # Cleanup on exit
@@ -93,7 +145,6 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║  MeshCore RAK WisBlock Firmware Builder      ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
 echo
-echo -e "  Target environment : ${CYAN}${ENV_NAME}${NC}"
 echo -e "  INA3221 support    : ${GREEN}enabled (via sensor_base)${NC}"
 echo -e "  Every run is a clean slate (firmware, Docker image, and caches purged first)."
 echo
@@ -136,6 +187,23 @@ echo -e "  ${GREEN}removed${NC} Python __pycache__"
 echo
 
 # ---------------------------------------------------------------------------
+# Hardware selection (skipped when --board or --env was given)
+# ---------------------------------------------------------------------------
+if [[ -z "$ENV_NAME" ]]; then
+    echo "Select your WisBlock hardware:"
+    echo "  1) Standard WisBlock RAK     (RAK4631)"
+    echo "  2) 1 watt WisBlock           (RAK3401 + RAK13302)"
+    echo
+    read -rp "Hardware [1-2, default: 1]: " HW_CHOICE
+    apply_board_choice "${HW_CHOICE:-1}"
+fi
+
+echo
+echo -e "  Hardware           : ${CYAN}${BOARD_NAME}${NC}"
+echo -e "  Target environment : ${CYAN}${ENV_NAME}${NC}"
+echo
+
+# ---------------------------------------------------------------------------
 # Region selection
 # ---------------------------------------------------------------------------
 echo "Select your LoRa region:"
@@ -167,6 +235,7 @@ esac
 # ---------------------------------------------------------------------------
 echo
 echo -e "${BLUE}Build configuration:${NC}"
+echo "  Hardware    : ${BOARD_NAME}"
 echo "  Environment : ${ENV_NAME}"
 echo "  Region      : ${REGION_NAME} (${LORA_FREQ} MHz, BW=${LORA_BW} kHz, SF=${LORA_SF})"
 echo "  INA3221     : enabled"

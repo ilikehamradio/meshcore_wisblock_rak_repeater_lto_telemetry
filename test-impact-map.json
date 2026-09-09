@@ -1,0 +1,15 @@
+{
+  "patches/inject_ina3221_config.py": [
+    "tests/test_inject_ina3221_config.py"
+  ],
+  "scripts/variant_ini.py": [
+    "tests/test_variant_ini.py"
+  ],
+  "scripts/container_build.sh": [
+    "tests/test_variant_ini.py",
+    "tests/test_inject_ina3221_config.py"
+  ],
+  "build_and_flash.sh": [
+    "tests/test_variant_ini.py"
+  ]
+}

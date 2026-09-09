@@ -1,8 +1,11 @@
 # MeshCore RAK WisBlock Repeater — Firmware Builder
 
 Automated build and flash toolchain for [MeshCore](https://github.com/meshcore-dev/MeshCore)
-`simple_repeater` firmware on a **RAK4631** (nRF52840) core fitted to a **RAK19007** base board,
+`simple_repeater` firmware on WisBlock RAK hardware fitted to a **RAK19007** base board,
 with full three-channel telemetry from a **Voltaic MCSBC-SVR / Xpander** INA3221 power monitor.
+
+Pick **standard RAK4631** or the **1 watt** WisMesh kit (**RAK3401** core + **RAK13302** radio)
+when the script starts.
 
 Everything runs inside Docker — no local toolchain, PlatformIO, or nrfutil installation required.
 Every invocation starts from a clean slate: stale firmware artifacts, the Docker image, and Python
@@ -14,12 +17,18 @@ caches are purged before each build.
 
 ## Hardware
 
-| Component | Part |
-|---|---|
-| Core module | RAK4631 (nRF52840 + SX1262) |
-| Base board | RAK19007 WisBlock Base |
-| Power monitor | Voltaic MCSBC-SVR / Xpander (INA3221, address `0x42`) |
-| I²C bus | Wire — pins 13 (SDA) / 14 (SCL) |
+| Component | Standard | 1 watt |
+|---|---|---|
+| Core module | RAK4631 (nRF52840 + SX1262) | RAK3401 (nRF52840, no onboard LoRa) |
+| LoRa radio | onboard SX1262 | RAK13302 (SX1262 + ~1 W PA) |
+| MeshCore env | `RAK_4631_repeater` | `RAK_3401_repeater` |
+| Base board | RAK19007 WisBlock Base | RAK19007 WisBlock Base |
+| Power monitor | Voltaic MCSBC-SVR / Xpander (INA3221, address `0x42`) | same |
+| I²C bus | Wire — pins 13 (SDA) / 14 (SCL) | same |
+
+The 1 watt option is the WisMesh 1W booster kit. The RAK13302 PA needs a stable **5 V** rail
+(battery on the RAK19007, or the kit's external 5 V feed). The 900 MHz RAK13302 is a poor
+fit for EU 868 MHz — use the matching frequency module for your region.
 
 ---
 
@@ -47,7 +56,7 @@ The script will:
 
 1. Purge any prior firmware artifacts, Docker image, and Python caches.
 2. Build a fresh Docker image containing PlatformIO, adafruit-nrfutil, and pyserial.
-3. Prompt you to select a **LoRa region**.
+3. Prompt you to select **hardware** (standard RAK4631 vs 1 watt RAK3401+RAK13302) and a **LoRa region**.
 4. Show a build summary and ask for confirmation.
 5. Clone MeshCore at the latest `main` commit (or a pinned commit), apply all patches, and compile.
 6. Offer to flash the resulting DFU package to your connected device over USB.
@@ -59,7 +68,8 @@ The script will:
 | Flag | Description |
 |---|---|
 | `--commit <SHA>` / `-c` | Pin the build to a specific MeshCore git commit (default: latest `main`) |
-| `--env <NAME>` / `-e` | PlatformIO environment name (default: `RAK_4631_repeater`) |
+| `--board <TYPE>` / `-b` | `standard` / `rak4631` or `1w` / `rak3401` (prompted if omitted) |
+| `--env <NAME>` / `-e` | PlatformIO environment name (overrides `--board`; e.g. `RAK_3401_repeater`) |
 | `--help` / `-h` | Print usage |
 
 ---
@@ -80,13 +90,24 @@ All regions use BW=250 kHz, SF=11.
 
 ---
 
+## Hardware selection
+
+| # | Hardware | MeshCore env |
+|---|---|---|
+| 1 | Standard WisBlock RAK (RAK4631) | `RAK_4631_repeater` |
+| 2 | 1 watt WisBlock (RAK3401 + RAK13302) | `RAK_3401_repeater` |
+
+Skip the prompt with `--board standard` or `--board 1w`.
+
+---
+
 ## Flash methods
 
 The script uses **adafruit-nrfutil DFU serial** flashing by default (runs entirely inside Docker).
 If the device does not enumerate or you prefer drag-and-drop:
 
 1. Double-tap RESET — the onboard LED will pulse slowly.
-2. The RAK4631 mounts as a USB drive.
+2. The WisBlock core mounts as a USB drive.
 3. Copy the UF2 file:
    ```bash
    cp firmware.uf2 /path/to/mounted/drive/
@@ -104,7 +125,8 @@ Three source-level patches are applied to every build to work around an nRF52 dr
 | 2 | Removes the `isChannelEnabled(i)` guard in the telemetry loop. On nRF52 this call silently NAKs and returns `false` for channels 1 and 2, so only channel 0 ever appears in telemetry without this fix. |
 | 3 | Injects `MESH_DEBUG_PRINTLN` per channel (compiles out completely in production — only active if `-D MESH_DEBUG=1` is added manually). |
 
-INA3221 build flags injected into `variants/rak4631/platformio.ini`:
+INA3221 build flags injected into the selected variant (`variants/rak4631/platformio.ini` or
+`variants/rak3401/platformio.ini`):
 
 ```
 -D TELEM_INA3221_ADDRESS=0x42       # Voltaic MCSBC-SVR confirmed address
@@ -122,7 +144,7 @@ After a successful build three files are written to the project root:
 |---|---|
 | `firmware.zip` | DFU package — used by the script for serial flashing |
 | `firmware.hex` | Intel HEX — compatible with nrfjprog / J-Link |
-| `firmware.uf2` | UF2 — drag-and-drop via the RAK4631 bootloader drive |
+| `firmware.uf2` | UF2 — drag-and-drop via the WisBlock bootloader drive |
 
 ---
 
@@ -153,5 +175,6 @@ sudo udevadm trigger
 └── scripts/
     ├── container_build.sh      Runs inside build container (clone → patch → compile)
     ├── container_flash.sh      Runs inside flash container (DFU touch → nrfutil flash)
-    └── dfu_touch.py            1200 bps DFU touch via pyserial
+    ├── dfu_touch.py            1200 bps DFU touch via pyserial
+    └── variant_ini.py          Maps RAK_4631_* / RAK_3401_* envs to the variant ini
 ```
